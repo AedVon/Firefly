@@ -9,10 +9,11 @@ from component.collator import PretrainCollator, SFTDataCollator
 from component.argument import CustomizedArguments
 from component.template import template_dict
 from component.dataset import (
-    UnifiedSFTDataset,
     ChatGLM2SFTDataset,
     ChatGLM3SFTDataset,
-    UnifiedDPODataset
+    UnifiedDPODataset,
+    CragEDASFTDataset,
+    CustomEDASFTDataset,
 )
 from transformers import (
     set_seed,
@@ -36,8 +37,7 @@ import torch.nn as nn
 
 def setup_everything():
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--train_args_file", type=str, default='train_args/pretrain/full/bloom-1b1-pretrain-full.json', help="")
-    parser.add_argument("--train_args_file", type=str, default='train_args/sft/qlora/qwen-7b-sft-qlora.json', help="")
+    parser.add_argument("--train_args_file", type=str, default='train_args/sft/qlora/qwen1.5-14b-chat-sft-qlora-xtop.json', help="")
     parser.add_argument("--local_rank", type=int, help="")
     args = parser.parse_args()
     train_args_file = args.train_args_file
@@ -302,18 +302,37 @@ def load_model(args, training_args):
 
 
 def load_sft_dataset(args, tokenizer):
-    if args.template_name not in template_dict.keys():
-        raise Exception(f"template_name doesn't exist, all template_name: {template_dict.keys()}")
-    template = template_dict[args.template_name]
-    if 'chatglm2' in args.model_name_or_path.lower():
-        logger.info('Loading data with ChatGLM2SFTDataset')
-        train_dataset = ChatGLM2SFTDataset(args.train_file, tokenizer, args.max_seq_length, template)
-    elif 'chatglm3' in args.model_name_or_path.lower():
-        logger.info('Loading data with ChatGLM3SFTDataset')
-        train_dataset = ChatGLM3SFTDataset(args.train_file, tokenizer, args.max_seq_length, template)
-    else:
-        logger.info('Loading data with UnifiedSFTDataset')
-        train_dataset = UnifiedSFTDataset(args.train_file, tokenizer, args.max_seq_length, template)
+    if args.template_name is not None:
+        if args.template_name not in template_dict.keys():
+            raise Exception(f"template_name doesn't exist, all template_name: {template_dict.keys()}")
+        template = template_dict[args.template_name]
+        if 'chatglm2' in args.model_name_or_path.lower():
+            logger.info('Loading data with ChatGLM2SFTDataset')
+            train_dataset = ChatGLM2SFTDataset(args.train_file, tokenizer, args.max_seq_length, template)
+        elif 'chatglm3' in args.model_name_or_path.lower():
+            logger.info('Loading data with ChatGLM3SFTDataset')
+            train_dataset = ChatGLM3SFTDataset(args.train_file, tokenizer, args.max_seq_length, template)
+        else:
+            logger.info('Loading data with CragEDASFTDataset')
+            template_general_qa = template_dict["general-qa"]
+            train_dataset = CragEDASFTDataset(args.train_file, tokenizer, args.max_seq_length, template, template_general_qa)
+    elif args.template_map is not None:
+        template_map = {
+            k: template_dict[v]
+        for k, v in args.template_map.items() if v in template_dict}
+
+        if 'qwen' in args.model_name_or_path.lower():
+            logger.info('Loading data with CustomEDASFTDataset')
+            train_dataset = CustomEDASFTDataset(
+                args.train_file,
+                "data/raw_data/ref_xtop.json",
+                tokenizer,
+                args.max_seq_length,
+                template_map,
+            )
+        else:
+            raise NotImplementedError
+
     return train_dataset
 
 

@@ -1,6 +1,13 @@
 import json
+import random
+from re import A
+from typing import Any, Dict, List, Optional
 from loguru import logger
 from torch.utils.data import Dataset
+from transformers import AutoTokenizer
+
+from component.template import Template
+from component.retriever import build_tfidf_retriever
 
 
 class UnifiedSFTDataset(Dataset):
@@ -53,8 +60,337 @@ class UnifiedSFTDataset(Dataset):
             input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
             output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
 
+
             input_ids += input_tokens + output_tokens
             target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        assert len(input_ids) == len(target_mask)
+        # 对长度进行截断
+        input_ids = input_ids[:self.max_seq_length]
+        target_mask = target_mask[:self.max_seq_length]
+        attention_mask = [1] * len(input_ids)
+        assert len(input_ids) == len(target_mask) == len(attention_mask)
+        inputs = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'target_mask': target_mask
+        }
+        return inputs
+
+
+class CragEDASFTDataset(Dataset):
+
+    def __init__(self, file, tokenizer, max_seq_length, template,template_general_qa):
+        self.tokenizer = tokenizer
+        self.template_name = template.template_name
+        self.system_format = template.system_format
+        self.user_format = template.user_format
+        self.assistant_format = template.assistant_format
+        self.system = template.system
+
+        self.system_format_general_qa = template_general_qa.system_format
+        self.user_format_general_qa = template_general_qa.user_format
+        self.assistant_format_general_qa = template_general_qa.assistant_format
+        self.system_general_qa = template_general_qa.system
+
+        self.max_seq_length = max_seq_length
+        logger.info('Loading data: {}'.format(file))
+        with open(file, 'r', encoding='utf8') as f:
+            data_list = f.readlines()
+        logger.info(f'Use template "{self.template_name}" for training')
+        logger.info("There are {} data in dataset".format(len(data_list)))
+        self.data_list = data_list
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def __getitem__(self, index):
+        # 每条数据拼接格式为: {system_format}{user_format}{assistant_format}{user_format}{assistant_format}...
+        data = self.data_list[index]
+        data = json.loads(data)
+        input_ids, target_mask = [], []
+
+        if data["category"]=="Brainstorming":
+            # setting system information
+            if self.system_format is not None:
+                system = data['system'].strip() if 'system' in data.keys() else self.system
+                # system信息不为空
+                if system is not None:
+                    system_text = self.system_format.format(content=system)
+                    input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+                    target_mask = [0] * len(input_ids)
+
+            conversations = data['conversation']
+            # 拼接多轮对话
+            for i, conv in enumerate(conversations):
+                question = conv["question"].strip()
+                reference = conv["reference_content"].strip()
+                answer = conv["answer"].strip()
+
+
+                human = self.user_format.format(query=question, reference = reference, stop_token=self.tokenizer.eos_token)
+                assistant = self.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                # print(human)
+                # print(assistant)
+                # exit()
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+        elif data["category"]=="general_qa":
+            if self.system_format_general_qa is not None:
+                system = data['system'].strip() if 'system' in data.keys() else self.system_general_qa
+                # system信息不为空
+                if system is not None:
+                    system_text = self.system_format_general_qa.format(content=system)
+                    input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+                    target_mask = [0] * len(input_ids)
+
+            conversations = data['conversation']
+            # 拼接多轮对话
+            for i, conv in enumerate(conversations):
+                question = conv["question"].strip()
+                reference = conv["reference_content"].strip()
+                answer = conv["answer"].strip()
+
+
+                human = self.user_format_general_qa.format(query=question, reference = reference, stop_token=self.tokenizer.eos_token)
+                assistant = self.assistant_format_general_qa.format(content=answer, stop_token=self.tokenizer.eos_token)
+                # print(human)
+                # print(assistant)
+                # exit()
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+        else:
+            exit()
+
+        assert len(input_ids) == len(target_mask)
+        # 对长度进行截断
+        input_ids = input_ids[:self.max_seq_length]
+        target_mask = target_mask[:self.max_seq_length]
+        attention_mask = [1] * len(input_ids)
+        assert len(input_ids) == len(target_mask) == len(attention_mask)
+        inputs = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'target_mask': target_mask
+        }
+        return inputs
+
+
+class CustomEDASFTDataset(Dataset):
+
+    def __init__(
+        self,
+        file: str,
+        knowledge_path: str,
+        tokenizer: AutoTokenizer,
+        max_seq_length: int,
+        template_map: Dict[str, Template],
+    ) -> None:
+        self.tokenizer = tokenizer
+        self.template_map = template_map
+        self.retriever = build_tfidf_retriever(
+            file_path=knowledge_path,
+            split_text=False,
+            k=30,
+        )
+
+        self.max_seq_length = max_seq_length
+        logger.info('Loading data: {}'.format(file))
+        with open(file, 'r', encoding='utf8') as f:
+            data_list = f.readlines()
+        logger.info("There are {} data in dataset".format(len(data_list)))
+        self.data_list = data_list
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def _parse_reference(self, refs: List[Dict[str, str]]) -> str:
+        parsed_refs = [f'[{idx}]\n{elem["content"]}\n(doc_id: {elem["doc_id"]})' for idx, elem in enumerate(refs, 1)]
+        return "\n\n".join(parsed_refs)
+
+    def _data_aug(self, data: Dict[str, Any], data_aug_prob: Optional[List[float]] = None):
+        def _random_add_negative(_data):
+            # save positive
+            _data["positive_reference_doc_id"] = _data["reference_doc_id"]
+            _data["positive_reference"] = _data["reference"]
+            # add negative
+            relevant_documents = self.retriever.get_relevant_documents(_data["question"])
+            neg_documents = [doc for doc in relevant_documents
+                             if doc.metadata["doc_id"] not in _data["reference_doc_id"]]
+            neg_documents = random.sample(neg_documents, random.randint(1, 3))
+            _data["reference_doc_id"] += [doc.metadata["doc_id"] for doc in neg_documents]
+            _data["reference"] += [{"doc_id": doc.metadata["doc_id"], "content": doc.page_content} for doc in neg_documents]
+            return _data
+
+        def _random_shuffle_reference(_data):
+            reference_doc_id = _data["reference_doc_id"]
+            reference = _data["reference"]
+            zip_reference = [(doc_id, ref) for doc_id, ref in zip(reference_doc_id, reference)]
+
+            random.shuffle(zip_reference)
+            _data["reference_doc_id"] = [elem[0] for elem in zip_reference]
+            _data["reference"] = [elem[1] for elem in zip_reference]
+            return _data
+
+        def _remove_reference(_data):
+            _data["reference_doc_id"] = []
+            _data["reference"] = []
+            _data["answer"] = "抱歉，您的问题答案不在知识库范围内。" if not _data["answer"].encode("utf-8").isalpha() else \
+                              "Sorry, the answer is not in our knowledge base."
+            return _data
+
+        def _remove_positive(_data):
+            if "selected_reference_doc_id" in _data:
+                _reference_doc_id, _reference = [], []
+                for _doc_id, _doc in zip(_data["reference_doc_id"], _data["reference"]):
+                    if _doc_id not in _data["selected_reference_doc_id"]:
+                        _reference_doc_id.append(_doc_id)
+                        _reference.append(_doc)
+                _data["reference_doc_id"], _data["reference"] = _reference_doc_id, _reference
+                _data["analysis"] = "这些参考资料都与客户问题无关。" if not _data["answer"].encode("utf-8").isalpha() else \
+                              "None of these references are related to query."
+                _data["answer"] = "抱歉，我无法准确解答您的问题。" if not _data["answer"].encode("utf-8").isalpha() else \
+                                  "Sorry, I can't answer your question accurately."
+            elif "positive_reference_doc_id" in _data:
+                _reference_doc_id, _reference = [], []
+                for _doc_id, _doc in zip(_data["reference_doc_id"], _data["reference"]):
+                    if _doc_id not in _data["positive_reference_doc_id"]:
+                        _reference_doc_id.append(_doc_id)
+                        _reference.append(_doc)
+                _data["reference_doc_id"], _data["reference"] = _reference_doc_id, _reference
+                _data["answer"] = "抱歉，我无法准确解答您的问题。" if not _data["answer"].encode("utf-8").isalpha() else \
+                                  "Sorry, I can't answer your question accurately."
+            else:
+                _data["reference_doc_id"] = []
+                _data["reference"] = []
+                _data["answer"] = "抱歉，您的问题答案不在知识库范围内。" if not _data["answer"].encode("utf-8").isalpha() else \
+                                  "Sorry, the answer is not in our knowledge base."
+            return _data
+
+        data_aug_func = [_random_add_negative, _random_shuffle_reference, _remove_reference, _remove_positive]
+        data_aug_prob = [0.8, 0.5, 0.05, 0.2] if data_aug_prob is None else data_aug_prob
+        assert len(data_aug_func) == len(data_aug_prob)
+
+        for func, prob in zip(data_aug_func, data_aug_prob):
+            if random.random() < prob:
+                data = func(data)
+
+        return data
+
+    def __getitem__(self, index):
+        # 每条数据拼接格式为: {system_format}{user_format}{assistant_format}{user_format}{assistant_format}...
+        data = self.data_list[index]
+        data = json.loads(data, strict=False)
+        category = data["category"]
+        conversations = data['conversation']
+
+        input_ids, target_mask = [], []
+
+        if category in ["qa_openroad_v1", "qa_openroad_v2"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                # 数据增强
+                conv = self._data_aug(conv, data_aug_prob=[0., 0., 0.05, 0.])
+
+                question = conv["question"]
+                reference = self._parse_reference(conv["reference"])
+                answer = conv["answer"]
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, stop_token=self.tokenizer.eos_token)
+                assistant = template.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_xtop_v1", "qa_xtop_v2", "qa_xtop_v3"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                # 数据增强
+                conv = self._data_aug(conv, data_aug_prob=[0.8, 1.0, 0.05, 0.1])
+
+                question = conv["question"]
+                reference = self._parse_reference(conv["reference"])
+                answer = conv["answer"]
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, stop_token=self.tokenizer.eos_token)
+                assistant = template.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_xtop_v4"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                conv["reference_doc_id"] = conv["relevant_reference_doc_id"]
+                conv["reference"] = conv["relevant_reference"]
+                # data augment
+                if len(conv["relevant_reference_doc_id"]) == len(conv["selected_reference_doc_id"]):
+                    conv = self._data_aug(conv, data_aug_prob=[1.0, 1.0, 0.05, 0.1])
+                else:
+                    conv = self._data_aug(conv, data_aug_prob=[0., 1.0, 0.05, 0.1])
+
+                # data process
+                reference_doc_id, reference = conv["reference_doc_id"], conv["reference"]
+                if len(reference) > 5 and not len(conv["selected_reference"]) > 5:
+                    neg_reference_doc_id, neg_reference = [], []
+                    for _doc_id, _doc in zip(reference_doc_id, reference):
+                        if _doc_id not in conv["selected_reference_doc_id"]:
+                            neg_reference_doc_id.append(_doc_id)
+                            neg_reference.append(_doc)
+                    reference_doc_id = conv["selected_reference_doc_id"] + random.sample(neg_reference_doc_id, 5 - len(conv["selected_reference_doc_id"]))
+                    reference = conv["selected_reference"] + random.sample(neg_reference, 5 - len(conv["selected_reference"]))
+
+                selected_ids = [reference_doc_id.index(_doc_id) + 1 for _doc_id in conv["selected_reference_doc_id"]]
+
+                question = conv["question"]
+                reference = self._parse_reference(reference)
+                answer = {
+                    "selected_ids": selected_ids,
+                    "thought": conv["analysis"],
+                    "answer": conv["answer"],
+                }
+                answer = json.dumps(answer, ensure_ascii=False)
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, stop_token=self.tokenizer.eos_token)
+                assistant = template.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        else:
+            exit()
 
         assert len(input_ids) == len(target_mask)
         # 对长度进行截断
@@ -289,3 +625,28 @@ class UnifiedDPODataset(Dataset):
     # 为了适配DPOTrainer的接口
     def map(self, func, **kwargs):
         return self
+
+
+if __name__ == "__main__":
+    from component.template import template_dict
+
+    template_map={
+        "qa_openroad_v1": "qa_openroad",
+        "qa_openroad_v2": "qa_openroad",
+        "qa_xtop_v1": "qa_xtop_v1",
+        "qa_xtop_v2": "qa_xtop_v2",
+        "qa_xtop_v4": "qa_xtop_v4",
+    }
+    template_map = {
+        k: template_dict[v]
+    for k, v in template_map.items() if v in template_dict}
+
+    dataset = CustomEDASFTDataset(
+        file="/home/ubuntu/tairu/code/huada-docqa-data-generation/data/qa_data/qa_xtop_openroad_v2.jsonl",
+        knowledge_path="data/raw_data/ref_xtop.json",
+        tokenizer=None,
+        max_seq_length=8192,
+        template_map=template_map,
+    )
+    data = dataset[-1]
+    print(data)

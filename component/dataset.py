@@ -207,7 +207,8 @@ class CustomEDASFTDataset(Dataset):
         with open(file, 'r', encoding='utf8') as f:
             data_list = f.readlines()
         logger.info("There are {} data in dataset".format(len(data_list)))
-        self.data_list = random.shuffle(data_list)
+        self.data_list = data_list
+        random.shuffle(self.data_list)
 
     def __len__(self):
         return len(self.data_list)
@@ -327,7 +328,7 @@ class CustomEDASFTDataset(Dataset):
             # 拼接多轮对话
             for conv in conversations:
                 # 数据增强
-                conv = self._data_aug(conv, data_aug_prob=[0.8, 1.0, 0., 0.05])
+                conv = self._data_aug(conv, data_aug_prob=[0.8, 1.0, 0., 0.])
 
                 question = conv["question"]
                 reference = self._parse_reference(conv["reference"])
@@ -355,9 +356,9 @@ class CustomEDASFTDataset(Dataset):
                 conv["reference"] = conv["relevant_reference"]
                 # data augment
                 if len(conv["relevant_reference_doc_id"]) == len(conv["selected_reference_doc_id"]):
-                    conv = self._data_aug(conv, data_aug_prob=[1.0, 1.0, 0., 0.05])
+                    conv = self._data_aug(conv, data_aug_prob=[1.0, 1.0, 0., 0.])
                 else:
-                    conv = self._data_aug(conv, data_aug_prob=[0., 1.0, 0., 0.05])
+                    conv = self._data_aug(conv, data_aug_prob=[0., 1.0, 0., 0.])
 
                 # data process
                 reference_doc_id, reference = conv["reference_doc_id"], conv["reference"]

@@ -385,8 +385,6 @@ def init_components(args, training_args):
             data_collator=data_collator,
             tokenizer=tokenizer,
             peft_config=peft_config,
-            max_length=args.max_seq_length,
-            max_prompt_length=args.max_prompt_length,
         )
     # pretrain or sft
     else:
@@ -413,6 +411,7 @@ def main():
     trainer.save_model(final_save_path)  # Saves the tokenizer too
     # 保存训练指标
     metrics = train_result.metrics
+    logger.info("*** saving state ***")
     trainer.log_metrics("train", metrics)
     trainer.save_metrics("train", metrics)
     trainer.save_state()

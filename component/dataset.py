@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
 from component.template import Template
-from component.retriever import build_tfidf_retriever
+from component.retriever import build_faiss_retriever
 
 
 class UnifiedSFTDataset(Dataset):
@@ -196,10 +196,9 @@ class CustomEDASFTDataset(Dataset):
     ) -> None:
         self.tokenizer = tokenizer
         self.template_map = template_map
-        self.retriever = build_tfidf_retriever(
+        self.retriever = build_faiss_retriever(
             file_path=knowledge_path,
-            split_text=False,
-            k=30,
+            search_kwargs={"k": 30},
         )
 
         self.max_seq_length = max_seq_length
@@ -219,14 +218,18 @@ class CustomEDASFTDataset(Dataset):
 
     def _data_aug(self, data: Dict[str, Any], data_aug_prob: Optional[List[float]] = None):
         def _random_add_negative(_data):
-            # save positive
-            _data["positive_reference_doc_id"] = _data["reference_doc_id"]
-            _data["positive_reference"] = _data["reference"]
+            # # save positive
+            # _data["positive_reference_doc_id"] = _data["reference_doc_id"]
+            # _data["positive_reference"] = _data["reference"]
+
+            if len(_data["reference_doc_id"]) >= 5:
+                return _data
+
             # add negative
             relevant_documents = self.retriever.get_relevant_documents(_data["question"])
             neg_documents = [doc for doc in relevant_documents
                              if doc.metadata["doc_id"] not in _data["reference_doc_id"]]
-            neg_documents = random.sample(neg_documents, random.randint(1, 3))
+            neg_documents = random.sample(neg_documents, random.randint(1, min(3, 5 - len(_data["reference_doc_id"]))))
             _data["reference_doc_id"] += [doc.metadata["doc_id"] for doc in neg_documents]
             _data["reference"] += [{"doc_id": doc.metadata["doc_id"], "content": doc.page_content} for doc in neg_documents]
             return _data
@@ -276,8 +279,8 @@ class CustomEDASFTDataset(Dataset):
                                   "Sorry, the answer is not in our knowledge base."
             return _data
 
-        data_aug_func = [_random_add_negative, _random_shuffle_reference, _remove_reference, _remove_positive]
-        data_aug_prob = [0.8, 0.5, 0.05, 0.] if data_aug_prob is None else data_aug_prob
+        data_aug_func = [_random_add_negative, _random_shuffle_reference]
+        data_aug_prob = [0.8, 0.5] if data_aug_prob is None else data_aug_prob
         assert len(data_aug_func) == len(data_aug_prob)
 
         for func, prob in zip(data_aug_func, data_aug_prob):
@@ -304,7 +307,7 @@ class CustomEDASFTDataset(Dataset):
             # 拼接多轮对话
             for conv in conversations:
                 # 数据增强
-                conv = self._data_aug(conv, data_aug_prob=[0., 0., 0., 0.])
+                conv = self._data_aug(conv, data_aug_prob=[0., 0.])
 
                 question = conv["question"]
                 reference = self._parse_reference(conv["reference"])
@@ -328,7 +331,7 @@ class CustomEDASFTDataset(Dataset):
             # 拼接多轮对话
             for conv in conversations:
                 # 数据增强
-                conv = self._data_aug(conv, data_aug_prob=[0.8, 1.0, 0., 0.])
+                conv = self._data_aug(conv, data_aug_prob=[0.8, 1.0])
 
                 question = conv["question"]
                 reference = self._parse_reference(conv["reference"])
@@ -344,7 +347,7 @@ class CustomEDASFTDataset(Dataset):
                 target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
 
         elif category in ["qa_xtop_v4"]:
-            task = random.choice(["select_reference", "doc_qa", "all"])
+            task = random.choice(["select_reference", "doc_qa"])
             template = self.template_map[f"{category}_{task}"]
             system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
@@ -352,52 +355,36 @@ class CustomEDASFTDataset(Dataset):
 
             # 拼接多轮对话
             for conv in conversations:
-                conv["reference_doc_id"] = conv["relevant_reference_doc_id"]
-                conv["reference"] = conv["relevant_reference"]
-                # data augment
-                if len(conv["relevant_reference_doc_id"]) == len(conv["selected_reference_doc_id"]):
-                    conv = self._data_aug(conv, data_aug_prob=[1.0, 1.0, 0., 0.])
-                else:
-                    conv = self._data_aug(conv, data_aug_prob=[0., 1.0, 0., 0.])
+                if task == "select_reference":
+                    gt_reference_doc_id = conv["selected_reference_doc_id"]
+                    conv["reference_doc_id"] = conv["relevant_reference_doc_id"]
+                    conv["reference"] = conv["relevant_reference"]
+                    # data augment
+                    if len(gt_reference_doc_id) == len(conv["relevant_reference_doc_id"]):
+                        conv = self._data_aug(conv, data_aug_prob=[1.0, 1.0])
+                    else:
+                        conv = self._data_aug(conv, data_aug_prob=[0., 1.0])
 
-                # data process
-                reference_doc_id, reference = conv["reference_doc_id"], conv["reference"]
-                if len(reference) > 5 and not len(conv["selected_reference"]) > 5:
-                    neg_reference_doc_id, neg_reference = [], []
-                    for _doc_id, _doc in zip(reference_doc_id, reference):
-                        if _doc_id not in conv["selected_reference_doc_id"]:
-                            neg_reference_doc_id.append(_doc_id)
-                            neg_reference.append(_doc)
-                    reference_doc_id = conv["selected_reference_doc_id"] + random.sample(neg_reference_doc_id, 5 - len(conv["selected_reference_doc_id"]))
-                    reference = conv["selected_reference"] + random.sample(neg_reference, 5 - len(conv["selected_reference"]))
+                    selected_ids = [conv["reference_doc_id"].index(_doc_id) + 1 for _doc_id in gt_reference_doc_id]
 
-                selected_ids = [reference_doc_id.index(_doc_id) + 1 for _doc_id in conv["selected_reference_doc_id"] if _doc_id in reference_doc_id]
-
-                question = conv["question"]
-                reference = self._parse_reference(reference)
-                if task == "all":
+                    question = conv["question"]
+                    reference = self._parse_reference(conv["reference"])
                     answer = {
-                        "thought": conv["analysis"],
-                        "selected_ids": selected_ids,
-                        "answer": conv["answer"],
-                    }
-                elif task == "select_reference":
-                    answer = {
-                        "thought": conv["analysis"],
                         "selected_ids": selected_ids,
                     }
+                    answer = json.dumps(answer, ensure_ascii=False)
                 elif task == "doc_qa":
+                    question = conv["question"]
+                    reference = self._parse_reference(conv["selected_reference"])
                     answer = {
                         "thought": conv["analysis"],
                         "answer": conv["answer"],
                     }
-                else:
-                    raise NotImplementedError
-                answer = json.dumps(answer, ensure_ascii=False)
+                    answer = json.dumps(answer, ensure_ascii=False)
 
                 # format and encode
-                human = template.user_format.format(query=question, reference=reference, stop_token=self.tokenizer.eos_token)
-                assistant = template.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                human = template.user_format.format(query=question, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
                 input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
                 output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
 
@@ -662,6 +649,7 @@ class CustomDPODataset(Dataset):
         logger.info(f'Use template "{self.template_name}" for training')
         logger.info("There are {} data in dataset".format(len(data_list)))
         self.data_list = data_list
+        random.shuffle(self.data_list)
 
     def __len__(self):
         return len(self.data_list)
@@ -702,7 +690,7 @@ class CustomDPODataset(Dataset):
 
     def __getitem__(self, index):
         data = self.data_list[index]
-        data = json.loads(data)
+        data = json.loads(data, strict=False)
         chosen = data['chosen']
         rejected = data['rejected']
         assert len(chosen) == len(rejected)
@@ -765,33 +753,33 @@ class CustomDPODataset(Dataset):
 if __name__ == "__main__":
     from component.template import template_dict
 
-    # template_map={
-    #     "qa_openroad_v1": "qa_openroad",
-    #     "qa_openroad_v2": "qa_openroad",
-    #     "qa_xtop_v1": "qa_xtop_v1",
-    #     "qa_xtop_v2": "qa_xtop_v2",
-    #     "qa_xtop_v4": "qa_xtop_v4",
-    # }
-    # template_map = {
-    #     k: template_dict[v]
-    # for k, v in template_map.items() if v in template_dict}
+    template_map={
+        "qa_openroad_v1": "qa_openroad",
+        "qa_openroad_v2": "qa_openroad",
+        "qa_xtop_v2": "qa_xtop_v2",
+        "qa_xtop_v4_select_reference": "qa_xtop_v4_select_reference",
+        "qa_xtop_v4_doc_qa": "qa_xtop_v4_doc_qa",
+    }
+    template_map = {
+        k: template_dict[v]
+    for k, v in template_map.items() if v in template_dict}
 
-    # dataset = CustomEDASFTDataset(
-    #     file="/home/ubuntu/tairu/code/huada-docqa-data-generation/data/qa_data/qa_xtop_openroad_v2.jsonl",
-    #     knowledge_path="data/raw_data/ref_xtop.json",
-    #     tokenizer=None,
-    #     max_seq_length=8192,
-    #     template_map=template_map,
-    # )
-    # data = dataset[-1]
-    # print(data)
-
-    dataset = CustomDPODataset(
-        file="data/raw_data/qa_xtop_dpo_merged.jsonl",
+    dataset = CustomEDASFTDataset(
+        file="/home/ubuntu/tairu/code/huada-docqa-data-generation/data/qa_data/qa_xtop_openroad_v3.jsonl",
+        knowledge_path="data/raw_data/ref_xtop.json",
         tokenizer=None,
-        max_seq_length=8192,
-        max_prompt_length=8192,
-        template=template_dict["qa_xtop_dpo"],
+        max_seq_length=4096,
+        template_map=template_map,
     )
     data = dataset[-1]
     print(data)
+
+    # dataset = CustomDPODataset(
+    #     file="data/raw_data/qa_xtop_dpo_merged.jsonl",
+    #     tokenizer=None,
+    #     max_seq_length=8192,
+    #     max_prompt_length=8192,
+    #     template=template_dict["qa_xtop_dpo"],
+    # )
+    # data = dataset[-1]
+    # print(data)

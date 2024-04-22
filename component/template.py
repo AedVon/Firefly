@@ -183,6 +183,15 @@ register_template(
     stop_word='<|im_end|>'
 )
 
+register_template(
+    template_name="qa_xtop_dpo",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>answer:<|startoftext|>\n',
+    assistant_format='{content}<|endoftext|><|im_end|>\n',
+    system = QA_XTOP_V4_PROMPT,
+    stop_word='<|im_end|>'
+)
+
 # register_template(
 #     template_name="orion",
 #     system_format='<s>',

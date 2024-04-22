@@ -14,6 +14,7 @@ from component.dataset import (
     UnifiedDPODataset,
     CragEDASFTDataset,
     CustomEDASFTDataset,
+    CustomDPODataset,
 )
 from transformers import (
     set_seed,
@@ -37,7 +38,7 @@ import torch.nn as nn
 
 def setup_everything():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_args_file", type=str, default='train_args/sft/qlora/qwen1.5-14b-chat-sft-qlora-xtop.json', help="")
+    parser.add_argument("--train_args_file", type=str, default='train_args/dpo/qlora/qwen1.5-14b-chat-dpo-qlora-xtop.json', help="")
     parser.add_argument("--local_rank", type=int, help="")
     args = parser.parse_args()
     train_args_file = args.train_args_file
@@ -340,7 +341,7 @@ def load_dpo_dataset(args, tokenizer):
     if args.template_name not in template_dict.keys():
         raise Exception(f"template_name doesn't exist, all template_name: {template_dict.keys()}")
     template = template_dict[args.template_name]
-    train_dataset = UnifiedDPODataset(args.train_file, tokenizer, args.max_seq_length, args.max_prompt_length, template)
+    train_dataset = CustomDPODataset(args.train_file, tokenizer, args.max_seq_length, args.max_prompt_length, template)
     return train_dataset
 
 
@@ -383,7 +384,9 @@ def init_components(args, training_args):
             train_dataset=train_dataset,
             data_collator=data_collator,
             tokenizer=tokenizer,
-            peft_config=peft_config
+            peft_config=peft_config,
+            max_length=args.max_seq_length,
+            max_prompt_length=args.max_prompt_length,
         )
     # pretrain or sft
     else:

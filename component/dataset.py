@@ -207,7 +207,7 @@ class CustomEDASFTDataset(Dataset):
         with open(file, 'r', encoding='utf8') as f:
             data_list = f.readlines()
         logger.info("There are {} data in dataset".format(len(data_list)))
-        self.data_list = data_list
+        self.data_list = random.shuffle(data_list)
 
     def __len__(self):
         return len(self.data_list)
@@ -343,7 +343,8 @@ class CustomEDASFTDataset(Dataset):
                 target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
 
         elif category in ["qa_xtop_v4"]:
-            template = self.template_map[category]
+            task = random.choice(["select_reference", "doc_qa", "all"])
+            template = self.template_map[f"{category}_{task}"]
             system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
             target_mask = [0] * len(input_ids)
@@ -373,11 +374,24 @@ class CustomEDASFTDataset(Dataset):
 
                 question = conv["question"]
                 reference = self._parse_reference(reference)
-                answer = {
-                    "selected_ids": selected_ids,
-                    "thought": conv["analysis"],
-                    "answer": conv["answer"],
-                }
+                if task == "all":
+                    answer = {
+                        "thought": conv["analysis"],
+                        "selected_ids": selected_ids,
+                        "answer": conv["answer"],
+                    }
+                elif task == "select_reference":
+                    answer = {
+                        "thought": conv["analysis"],
+                        "selected_ids": selected_ids,
+                    }
+                elif task == "doc_qa":
+                    answer = {
+                        "thought": conv["analysis"],
+                        "answer": conv["answer"],
+                    }
+                else:
+                    raise NotImplementedError
                 answer = json.dumps(answer, ensure_ascii=False)
 
                 # format and encode

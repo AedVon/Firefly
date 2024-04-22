@@ -175,7 +175,25 @@ register_template(
 )
 
 register_template(
-    template_name="qa_xtop_v4",
+    template_name="qa_xtop_v4_all",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>answer:<|startoftext|>\n',
+    assistant_format='{content}<|endoftext|><|im_end|>\n',
+    system = QA_XTOP_V4_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qa_xtop_v4_select_reference",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>answer:<|startoftext|>\n',
+    assistant_format='{content}<|endoftext|><|im_end|>\n',
+    system = QA_XTOP_V4_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qa_xtop_v4_doc_qa",
     system_format='<|im_start|>system\n{content}<|im_end|>\n',
     user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>answer:<|startoftext|>\n',
     assistant_format='{content}<|endoftext|><|im_end|>\n',

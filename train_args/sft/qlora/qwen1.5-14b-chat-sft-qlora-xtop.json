@@ -6,7 +6,9 @@
         "qa_openroad_v1": "qa_openroad",
         "qa_openroad_v2": "qa_openroad",
         "qa_xtop_v2": "qa_xtop_v2",
-        "qa_xtop_v4": "qa_xtop_v4"
+        "qa_xtop_v4_all": "qa_xtop_v4_all",
+        "qa_xtop_v4_select_reference": "qa_xtop_v4_select_reference",
+        "qa_xtop_v4_doc_qa": "qa_xtop_v4_doc_qa"
     },
     "num_train_epochs": 4,
     "per_device_train_batch_size": 1,

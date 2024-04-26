@@ -1,13 +1,13 @@
 {
-    "output_dir": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_openroad_epoch_4_v5",
+    "output_dir": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_openroad_epoch_4_lora_rank_64_v1",
     "model_name_or_path": "/nvme_disk1/public/weights/Qwen1.5-14B-Chat",
-    "train_file": "data/raw_data/qa_xtop_openroad_v3.jsonl",
+    "train_file": "data/raw_data/qa_xtop_openroad_v4.jsonl",
     "template_map": {
         "qa_openroad_v1": "qa_openroad",
         "qa_openroad_v2": "qa_openroad",
         "qa_xtop_v2": "qa_xtop_v2",
-        "qa_xtop_v4": "qa_xtop_v4_doc_qa",
-        "qa_xtop_v5": "qa_xtop_v4_doc_qa"
+        "qa_xtop_v4": "qa_xtop_v4",
+        "qa_xtop_v5": "qa_xtop_v4"
     },
     "num_train_epochs": 4,
     "per_device_train_batch_size": 1,

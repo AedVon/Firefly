@@ -63,7 +63,7 @@ register_template(
 )
 
 register_template(
-    template_name="qa_xtop_v4_doc_qa",
+    template_name="qa_xtop_v4",
     system_format='<|im_start|>system\n{content}<|im_end|>\n',
     user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>output:<|startoftext|>\n',
     assistant_format='{content}<|endoftext|><|im_end|>\n',

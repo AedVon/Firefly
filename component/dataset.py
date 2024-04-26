@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
 from component.template import Template
-from component.retriever import build_faiss_retriever
 
 
 class CustomEDASFTDataset(Dataset):
@@ -15,25 +14,21 @@ class CustomEDASFTDataset(Dataset):
     def __init__(
         self,
         file: str,
-        knowledge_path: str,
         tokenizer: AutoTokenizer,
         max_seq_length: int,
         template_map: Dict[str, Template],
     ) -> None:
         self.tokenizer = tokenizer
         self.template_map = template_map
-        self.retriever = build_faiss_retriever(
-            file_path=knowledge_path,
-            search_kwargs={"k": 30},
-        )
 
         self.max_seq_length = max_seq_length
         logger.info('Loading data: {}'.format(file))
         with open(file, 'r', encoding='utf8') as f:
             data_list = f.readlines()
         logger.info("There are {} data in dataset".format(len(data_list)))
+
+        random.shuffle(data_list)
         self.data_list = data_list
-        # random.shuffle(self.data_list)
 
     def __len__(self):
         return len(self.data_list)
@@ -51,7 +46,28 @@ class CustomEDASFTDataset(Dataset):
 
         input_ids, target_mask = [], []
 
-        if category in ["qa_xtop_v4"]:
+        if category in ["qa_openroad_v1", "qa_openroad_v2", "qa_xtop_v2"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                reference = self._parse_reference(conv["reference"])
+                answer = conv["answer"]
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, stop_token=self.tokenizer.eos_token)
+                assistant = template.assistant_format.format(content=answer, stop_token=self.tokenizer.eos_token)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_xtop_v4", "qa_xtop_v5"]:
             template = self.template_map[category]
             system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
@@ -62,7 +78,7 @@ class CustomEDASFTDataset(Dataset):
                 question = conv["question"]
                 reference = self._parse_reference(conv["selected_reference"])
                 answer = {
-                    "thought": conv["analysis"],
+                    "thought": conv["thought"],
                     "answer": conv["answer"],
                 }
                 answer = json.dumps(answer, ensure_ascii=False)
@@ -81,15 +97,19 @@ class CustomEDASFTDataset(Dataset):
 
         assert len(input_ids) == len(target_mask)
         # 对长度进行截断
-        input_ids = input_ids[:self.max_seq_length]
-        target_mask = target_mask[:self.max_seq_length]
-        attention_mask = [1] * len(input_ids)
-        assert len(input_ids) == len(target_mask) == len(attention_mask)
-        inputs = {
-            'input_ids': input_ids,
-            'attention_mask': attention_mask,
-            'target_mask': target_mask
-        }
+        if len(input_ids) > self.max_seq_length:
+            print("Too long input_ids: ", len(input_ids))
+            inputs = self.__getitem__(random.randint(0, len(self.data_list) - 1))
+        else:
+            input_ids = input_ids[:self.max_seq_length]
+            target_mask = target_mask[:self.max_seq_length]
+            attention_mask = [1] * len(input_ids)
+            assert len(input_ids) == len(target_mask) == len(attention_mask)
+            inputs = {
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'target_mask': target_mask
+            }
         return inputs
 
 

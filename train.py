@@ -9,12 +9,9 @@ from component.collator import PretrainCollator, SFTDataCollator
 from component.argument import CustomizedArguments
 from component.template import template_dict
 from component.dataset import (
-    ChatGLM2SFTDataset,
-    ChatGLM3SFTDataset,
-    UnifiedDPODataset,
-    CragEDASFTDataset,
     CustomEDASFTDataset,
     CustomDPODataset,
+    SelectReferenceEDASFTDataset,
 )
 from transformers import (
     set_seed,
@@ -326,11 +323,17 @@ def load_sft_dataset(args, tokenizer):
             logger.info('Loading data with CustomEDASFTDataset')
             train_dataset = CustomEDASFTDataset(
                 args.train_file,
-                "data/raw_data/ref_xtop.json",
                 tokenizer,
                 args.max_seq_length,
                 template_map,
             )
+            # logger.info('Loading data with SelectReferenceEDASFTDataset')
+            # train_dataset = SelectReferenceEDASFTDataset(
+            #     args.train_file,
+            #     tokenizer,
+            #     args.max_seq_length,
+            #     template_map,
+            # )
         else:
             raise NotImplementedError
 
@@ -411,7 +414,6 @@ def main():
     trainer.save_model(final_save_path)  # Saves the tokenizer too
     # 保存训练指标
     metrics = train_result.metrics
-    logger.info("*** saving state ***")
     trainer.log_metrics("train", metrics)
     trainer.save_metrics("train", metrics)
     trainer.save_state()

@@ -34,7 +34,7 @@ class CustomEDASFTDataset(Dataset):
         return len(self.data_list)
 
     def _parse_reference(self, refs: List[Dict[str, str]]) -> str:
-        parsed_refs = [f'[{idx}]\n{elem["content"]}\n(doc_id: {elem["doc_id"]})' for idx, elem in enumerate(refs, 1)]
+        parsed_refs = [f'[{idx}]\ndoc_id: {elem["doc_id"]}\n{elem["content"]}' for idx, elem in enumerate(refs, 1)]
         return "\n\n".join(parsed_refs)
 
     def __getitem__(self, index):
@@ -67,7 +67,7 @@ class CustomEDASFTDataset(Dataset):
                 input_ids += input_tokens + output_tokens
                 target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
 
-        elif category in ["qa_xtop_v4", "qa_xtop_v5"]:
+        elif category in ["qa_xtop_v4", "qa_xtop_v5", "qa_xtop_v7", "qa_xtop_v8"]:
             template = self.template_map[category]
             system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
@@ -82,6 +82,62 @@ class CustomEDASFTDataset(Dataset):
                     "answer": conv["answer"],
                 }
                 answer = json.dumps(answer, ensure_ascii=False)
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v1"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                reference_thought = [elem for elem in zip(conv["reference"], conv["thought"].split("\n"))]
+
+                # data augment
+                random.shuffle(reference_thought)
+                reference = [elem[0] for elem in reference_thought]
+                thought = '\n'.join([elem[1] for elem in reference_thought])
+
+                reference = self._parse_reference(reference)
+                answer = f"<Analysis>\n{thought}\n</Analysis>\n<Answer>\n{conv['answer']}\n</Answer>"
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v2"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                reference_thought = [elem for elem in zip(conv["reference"], conv["thought"].split("\n"))]
+
+                # data augment
+                random.shuffle(reference_thought)
+                reference = [elem[0] for elem in reference_thought]
+                thought = '\n'.join([elem[1] for elem in reference_thought])
+
+                reference = self._parse_reference(reference)
+                answer = f"<Analysis>\n{thought}\n</Analysis>\n<Answer>\n{conv['answer']}\n</Answer>"
 
                 # format and encode
                 human = template.user_format.format(query=question, reference=reference)
@@ -218,8 +274,9 @@ class CustomDPODataset(Dataset):
             data_list = f.readlines()
         logger.info(f'Use template "{self.template_name}" for training')
         logger.info("There are {} data in dataset".format(len(data_list)))
+
+        random.shuffle(data_list)
         self.data_list = data_list
-        # random.shuffle(self.data_list)
 
     def __len__(self):
         return len(self.data_list)
@@ -289,34 +346,28 @@ class CustomDPODataset(Dataset):
         chosen_input_ids = self.tokenizer.encode(chosen, add_special_tokens=False)
         rejected_input_ids = self.tokenizer.encode(rejected, add_special_tokens=False)
 
-        # truncate by max_seq_length
         longer_response_length = max(len(chosen_input_ids), len(rejected_input_ids))
-        # if combined sequence is too long, truncate the prompt
         if len(prompt_input_ids) + longer_response_length > self.max_seq_length:
-            max_prompt_length = max(self.max_prompt_length, self.max_seq_length - longer_response_length)
-            prompt_input_ids = prompt_input_ids[-max_prompt_length:]
-        # if that's still too long, truncate the response
-        if len(prompt_input_ids) + longer_response_length > self.max_seq_length:
-            chosen_input_ids = chosen_input_ids[: self.max_seq_length - len(prompt_input_ids)]
-            rejected_input_ids = rejected_input_ids[: self.max_seq_length - len(prompt_input_ids)]
+            print("Too long input_ids: ", len(prompt_input_ids) + longer_response_length)
+            inputs = self.__getitem__(random.randint(0, len(self.data_list) - 1))
+        else:
+            chosen_labels = [-100] * len(prompt_input_ids) + chosen_input_ids
+            chosen_input_ids = prompt_input_ids + chosen_input_ids
+            rejected_labels = [-100] * len(prompt_input_ids) + rejected_input_ids
+            rejected_input_ids = prompt_input_ids + rejected_input_ids
+            assert len(chosen_labels) == len(chosen_input_ids)
+            assert len(rejected_labels) == len(rejected_input_ids)
 
-        chosen_labels = [-100] * len(prompt_input_ids) + chosen_input_ids
-        chosen_input_ids = prompt_input_ids + chosen_input_ids
-        rejected_labels = [-100] * len(prompt_input_ids) + rejected_input_ids
-        rejected_input_ids = prompt_input_ids + rejected_input_ids
-        assert len(chosen_labels) == len(chosen_input_ids)
-        assert len(rejected_labels) == len(rejected_input_ids)
-
-        inputs = dict(
-            prompt_input_ids=prompt_input_ids,
-            prompt_attention_mask=[1]*len(prompt_input_ids),
-            chosen_input_ids=chosen_input_ids,
-            chosen_attention_mask=[1]*len(chosen_input_ids),
-            chosen_labels=chosen_labels,
-            rejected_input_ids=rejected_input_ids,
-            rejected_attention_mask=[1]*len(rejected_input_ids),
-            rejected_labels=rejected_labels,
-        )
+            inputs = dict(
+                prompt_input_ids=prompt_input_ids,
+                prompt_attention_mask=[1]*len(prompt_input_ids),
+                chosen_input_ids=chosen_input_ids,
+                chosen_attention_mask=[1]*len(chosen_input_ids),
+                chosen_labels=chosen_labels,
+                rejected_input_ids=rejected_input_ids,
+                rejected_attention_mask=[1]*len(rejected_input_ids),
+                rejected_labels=rejected_labels,
+            )
         return inputs
 
     # 为了适配DPOTrainer的接口
@@ -350,43 +401,38 @@ if __name__ == "__main__":
         return tokenizer
 
     template_map={
-        "qa_openroad_v1": "qa_openroad",
-        "qa_openroad_v2": "qa_openroad",
-        "qa_xtop_v2": "qa_xtop_v2",
-        "qa_xtop_v4_select_reference": "qa_xtop_v4_select_reference",
-        "qa_xtop_v4_doc_qa": "qa_xtop_v4_doc_qa",
-        "select_reference_xtop_v1": "select_reference_xtop",
-        "select_reference_xtop_v2": "select_reference_xtop",
+        "qa_scoring_v1": "qa_scoring_v1",
+        "qa_scoring_v2": "qa_scoring_v2",
     }
     template_map = {
         k: template_dict[v]
     for k, v in template_map.items() if v in template_dict}
 
-    # dataset = CustomEDASFTDataset(
-    #     file="/home/ubuntu/tairu/code/huada-docqa-data-generation/data/qa_data/qa_xtop_openroad_v3.jsonl",
-    #     knowledge_path="data/raw_data/ref_xtop.json",
-    #     tokenizer=None,
-    #     max_seq_length=4096,
-    #     template_map=template_map,
-    # )
-    # data = dataset[-1]
-    # print(data)
-
-    # dataset = CustomDPODataset(
-    #     file="data/raw_data/qa_xtop_dpo_merged.jsonl",
-    #     tokenizer=None,
-    #     max_seq_length=8192,
-    #     max_prompt_length=8192,
-    #     template=template_dict["qa_xtop_dpo"],
-    # )
-    # data = dataset[-1]
-    # print(data)
-
-    dataset = SelectReferenceEDASFTDataset(
-        file="data/raw_data/select_reference_xtop_merged.jsonl",
+    dataset = CustomEDASFTDataset(
+        file="data/raw_data/qa_xtop_openroad_v7.jsonl",
         tokenizer=load_tokenizer("/nvme_disk1/public/weights/Qwen1.5-14B-Chat"),
         max_seq_length=4096,
         template_map=template_map,
     )
     data = dataset[-1]
     print(data)
+
+    # dataset = CustomDPODataset(
+    #     # file="data/raw_data/qa_xtop_dpo_merged_v2.jsonl",
+    #     file="data/raw_data/qa_xtop_dpo_merged_v3.jsonl",
+    #     tokenizer=load_tokenizer("/nvme_disk1/public/weights/Qwen1.5-14B-Chat"),
+    #     max_seq_length=2048,
+    #     max_prompt_length=300,
+    #     template=template_dict["qa_xtop_dpo"],
+    # )
+    # data = dataset[-1]
+    # print(data)
+
+    # dataset = SelectReferenceEDASFTDataset(
+    #     file="data/raw_data/select_reference_xtop_merged.jsonl",
+    #     tokenizer=load_tokenizer("/nvme_disk1/public/weights/Qwen1.5-14B-Chat"),
+    #     max_seq_length=4096,
+    #     template_map=template_map,
+    # )
+    # data = dataset[-1]
+    # print(data)

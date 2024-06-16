@@ -5,6 +5,9 @@ from .prompt_template import (
     QA_XTOP_V2_PROMPT,
     QA_XTOP_V4_PROMPT,
     QA_XTOP_SELECT_REFERENCE_PROMPT,
+    QA_XTOP_DPO_PROMPT,
+    QA_SCORING_V1_PROMPT,
+    QA_SCORING_V2_PROMPT,
 )
 
 
@@ -76,7 +79,7 @@ register_template(
     system_format='<|im_start|>system\n{content}<|im_end|>\n',
     user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>output:<|startoftext|>\n',
     assistant_format='{content}<|endoftext|><|im_end|>\n',
-    system = QA_XTOP_V4_PROMPT,
+    system = QA_XTOP_DPO_PROMPT,
     stop_word='<|im_end|>'
 )
 
@@ -86,5 +89,23 @@ register_template(
     user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>output:<|startoftext|>\n',
     assistant_format='{content}<|endoftext|><|im_end|>\n',
     system = QA_XTOP_SELECT_REFERENCE_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qa_scoring_v1",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>output:<|startoftext|>\n',
+    assistant_format='{content}<|endoftext|><|im_end|>\n',
+    system = QA_SCORING_V1_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qa_scoring_v2",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user question:\n{query}<|im_end|>\n<|im_start|>Reference related to the question:\n{reference}<|im_end|>\n<|im_start|>output:<|startoftext|>\n',
+    assistant_format='{content}<|endoftext|><|im_end|>\n',
+    system = QA_SCORING_V2_PROMPT,
     stop_word='<|im_end|>'
 )

@@ -305,7 +305,7 @@ def load_sft_dataset(args, tokenizer):
             k: template_dict[v]
         for k, v in args.template_map.items() if v in template_dict}
 
-        if 'qwen' in args.model_name_or_path.lower():
+        if 'qwen' in args.model_name_or_path.lower() or 'yi' in args.model_name_or_path.lower():
             logger.info('Loading data with CustomEDASFTDataset')
             train_dataset = CustomEDASFTDataset(
                 args.train_file,

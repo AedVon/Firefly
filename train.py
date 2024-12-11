@@ -35,7 +35,7 @@ import torch.nn as nn
 
 def setup_everything():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train_args_file", type=str, default='train_args/dpo/qlora/qwen1.5-14b-chat-dpo-qlora-xtop.json', help="")
+    parser.add_argument("--train_args_file", type=str, default='train_args/sft/qlora/qwen-2.5-32b-chat-sft-qlora-xtop.json', help="")
     parser.add_argument("--local-rank", type=int, help="")
     args = parser.parse_args()
     train_args_file = args.train_args_file

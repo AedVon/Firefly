@@ -7,9 +7,9 @@ import torch
 
 
 def merge_lora_to_base_model():
-    model_name_or_path = '/nvme_disk1/public/weights/Qwen1.5-14B-Chat'
-    adapter_name_or_path = '/nvme_disk1/public/weights/Qwen1.5-14B-Chat-eda_and_general_mix'
-    save_path = '/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat-eda_and_general_mix_merge_lora'
+    model_name_or_path = '/nvme_disk1/public/weights/Qwen2.5-32B-Instruct'
+    adapter_name_or_path = '/nvme_disk1/tairu/weights/Qwen2.5-32B-Instruct_qa_xtop_qualib_openroad_v12_epoch_2_max_seq_3072_lora_rank_32_v1'
+    save_path = '/nvme_disk1/tairu/weights/Qwen2.5-32B-Instruct_qa_xtop_qualib_openroad_v12_epoch_2_max_seq_3072_lora_rank_32_v1_merge_lora'
 
     config = AutoConfig.from_pretrained(model_name_or_path)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -22,7 +22,7 @@ def merge_lora_to_base_model():
         model_name_or_path,
         trust_remote_code=True,
         low_cpu_mem_usage=True,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,
         # device_map='auto',
         device_map={'': 'cpu'}
     )

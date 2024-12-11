@@ -1,7 +1,7 @@
 import json
 import random
-from re import A
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List
 from loguru import logger
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
@@ -33,9 +33,40 @@ class CustomEDASFTDataset(Dataset):
     def __len__(self):
         return len(self.data_list)
 
-    def _parse_reference(self, refs: List[Dict[str, str]]) -> str:
-        parsed_refs = [f'[{idx}]\ndoc_id: {elem["doc_id"]}\n{elem["content"]}' for idx, elem in enumerate(refs, 1)]
+    def _parse_reference(self, refs: List[Dict[str, str]], **kwargs) -> str:
+        tool = kwargs.get("tool")
+        llm = kwargs.get("llm", "yi")
+
+        if llm == "yi":
+            if tool is None:
+                ref_format = "参考资料[{idx}]\ndoc_id: {doc_id}\n{content}"
+                parsed_refs = [ref_format.format(idx=idx, doc_id=elem["doc_id"], content=elem["content"]) for idx, elem in enumerate(refs, 1)]
+            else:
+                ref_format = "{tool}软件的参考资料[{idx}]\ndoc_id: {doc_id}\n{content}"
+                parsed_refs = [ref_format.format(tool=tool, idx=idx, doc_id=elem["doc_id"], content=elem["content"]) for idx, elem in enumerate(refs, 1)]
+        elif llm == "qwen":
+            ref_format = "**[{idx}] 来自 {tool}软件文档 {doc_id} 的内容：**\n\n```\n{content}\n```"
+            parsed_refs = [ref_format.format(tool=tool, idx=idx, doc_id=elem["doc_id"], content=elem["content"]) for idx, elem in enumerate(refs, 1)]
+        else:
+            raise NotImplementedError
+
         return "\n\n".join(parsed_refs)
+
+    def _parse_answer(self, response: str) -> Dict[str, Any]:
+        assert "<Analysis>" in response and "</Analysis>" in response, f"<Analysis> not found in\n{response}"
+        analysis = response.split("<Analysis>")[1].split("</Analysis>")[0].strip()
+
+        assert "<Score>" in response and "</Score>" in response, f"<Score> not found in\n{response}"
+        score = response.split("<Score>")[1].split("</Score>")[0].strip()
+
+        assert "<Answer>" in response and "</Answer>" in response, f"<Answer> not found in\n{response}"
+        answer = response.split("<Answer>")[1].split("</Answer>")[0].strip()
+
+        return {
+            "analysis": analysis,
+            "score": score,
+            "answer": answer,
+        }
 
     def __getitem__(self, index):
         # 每条数据拼接格式为: {system_format}{user_format}{assistant_format}{user_format}{assistant_format}...
@@ -120,7 +151,7 @@ class CustomEDASFTDataset(Dataset):
                 input_ids += input_tokens + output_tokens
                 target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
 
-        elif category in ["qa_scoring_v2"]:
+        elif category in ["qa_scoring_v2", "qa_scoring_v3", "qa_scoring_v5"]:
             template = self.template_map[category]
             system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
@@ -129,21 +160,194 @@ class CustomEDASFTDataset(Dataset):
             # 拼接多轮对话
             for conv in conversations:
                 question = conv["question"]
-                reference_thought = [elem for elem in zip(conv["reference"], conv["thought"].split("\n"))]
+                answer = conv["answer"]
+                parsed_answer = self._parse_answer(answer)
 
                 # data augment
-                random.shuffle(reference_thought)
-                reference = [elem[0] for elem in reference_thought]
-                thought = '\n'.join([elem[1] for elem in reference_thought])
+                zip_ref_score = [elem for elem in zip(conv["reference"], parsed_answer["score"].split("\n"))]
+                # zip_ref_score = random.sample(zip_ref_score, random.randint(2, min(len(zip_ref_score), 5)))
+                random.shuffle(zip_ref_score)
+                reference = [elem[0] for elem in zip_ref_score]
+                score_analysis = '\n'.join([elem[1] for elem in zip_ref_score])
 
                 reference = self._parse_reference(reference)
-                answer = f"<Analysis>\n{thought}\n</Analysis>\n<Answer>\n{conv['answer']}\n</Answer>"
+                answer = f"<Analysis>\n{parsed_answer['analysis']}\n</Analysis>\n<Score>\n{score_analysis}\n</Score>\n<Answer>\n{parsed_answer['answer']}\n</Answer>"
 
                 # format and encode
                 human = template.user_format.format(query=question, reference=reference)
                 assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False, max_length=8192)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False, max_length=8192)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v6", "qa_scoring_v7", "qa_scoring_v8", "qa_scoring_v9"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                answer = conv["answer"]
+                parsed_answer = self._parse_answer(answer)
+                reference = conv["reference"]
+
+                reference = self._parse_reference(reference)
+                answer = f"<Analysis>\n{parsed_answer['analysis']}\n</Analysis>\n<Score>\n{parsed_answer['score']}\n</Score>\n<Answer>\n{parsed_answer['answer']}\n</Answer>"
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False, max_length=8192)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False, max_length=8192)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v10", "qa_scoring_v11"]:
+            template = self.template_map[category]
+            tool = conversations[0]["tool"]
+            system_text = template.system_format.format(content=template.system).replace("{tool}", tool)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                answer = conv["answer"]
+                hint = conv["hint"]
+                reference = conv["reference"]
+
+                question = f"{question}\n你可以参考这些背景知识提示来回答：\n{hint}" if len(hint) > 0 else question
+                reference = self._parse_reference(reference, tool=tool)
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, tool=tool)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False, max_length=8192)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False, max_length=8192)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_image_v11"]:
+            template = self.template_map[category]
+            tool = conversations[0]["tool"]
+            system_text = template.system_format.format(content=template.system).replace("{tool}", tool)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                answer = conv["answer"]
+                hint = conv["hint"]
+                reference = conv["reference"]
+
+                question = f"{question}\n你可以参考这些背景知识提示来回答：\n{hint}" if len(hint) > 0 else question
+                question = f"{question}\n如果相关参考资料中包含示意图，请在答案中以“![图片描述](图片路径)”的格式插入示意图来补充说明。"
+                reference = self._parse_reference(reference, tool=tool, llm="qwen")
+
+                # format and encode
+                human = template.user_format.format(query=question, reference=reference, tool=tool)
+                assistant = template.assistant_format.format(content=answer)
                 input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
                 output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        # elif category in ["qa_scoring_v12"]:
+        #     template = self.template_map[category]
+        #     tool = conversations[0]["tool"]
+        #     reference = conversations[0]["reference"]
+        #     reference = self._parse_reference(reference, tool=tool, llm="qwen")
+
+        #     system_text = template.system_format.format(content=template.system).replace("{reference}", reference)
+        #     input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+        #     target_mask = [0] * len(input_ids)
+
+        #     # 拼接多轮对话
+        #     for conv in conversations:
+        #         question = conv["question"]
+        #         answer = conv["answer"]
+        #         hint = conv["hint"]
+
+        #         question = f"{question}\n你还可以参考以下背景知识提示来回答：\n{hint}" if len(hint) > 0 else question
+
+        #         # format and encode
+        #         human = template.user_format.format(query=question, tool=tool)
+        #         assistant = template.assistant_format.format(content=answer)
+        #         input_tokens = self.tokenizer.encode(human, add_special_tokens=False, max_length=8192)
+        #         output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False, max_length=8192)
+
+        #         input_ids += input_tokens + output_tokens
+        #         target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v12"]:
+            template = self.template_map[category]
+            tool = conversations[0]["tool"]
+            reference = conversations[0]["reference"]
+            reference = self._parse_reference(reference, tool=tool, llm="qwen")
+
+            system_text = template.system_format.format(content=template.system).replace("{tool}", tool)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                answer = conv["answer"]
+                question = f"{question} 可以详细说明一下吗？"
+
+                # format and encode
+                human = template.user_format.format(query=question, tool=tool, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_classify_v5"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                classify = conv["classify"]
+
+                # format and encode
+                human = template.user_format.format(query=question)
+                assistant = template.assistant_format.format(content=classify)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_naked_v5", "qa_naked_v7"]:
+            template = self.template_map[category]
+            system_text = template.system_format.format(content=template.system)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                naked_answer = conv["naked_answer"]
+
+                # format and encode
+                human = template.user_format.format(query=question)
+                assistant = template.assistant_format.format(content=naked_answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False, max_length=8192)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False, max_length=8192)
 
                 input_ids += input_tokens + output_tokens
                 target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
@@ -154,7 +358,7 @@ class CustomEDASFTDataset(Dataset):
         assert len(input_ids) == len(target_mask)
         # 对长度进行截断
         if len(input_ids) > self.max_seq_length:
-            print("Too long input_ids: ", len(input_ids))
+            # print("Too long input_ids: ", len(input_ids))
             inputs = self.__getitem__(random.randint(0, len(self.data_list) - 1))
         else:
             input_ids = input_ids[:self.max_seq_length]
@@ -401,21 +605,19 @@ if __name__ == "__main__":
         return tokenizer
 
     template_map={
-        "qa_scoring_v1": "qa_scoring_v1",
-        "qa_scoring_v2": "qa_scoring_v2",
+        "qa_scoring_v12": "qwen_qa_scoring_v12",
     }
     template_map = {
         k: template_dict[v]
     for k, v in template_map.items() if v in template_dict}
 
     dataset = CustomEDASFTDataset(
-        file="data/raw_data/qa_xtop_openroad_v7.jsonl",
-        tokenizer=load_tokenizer("/nvme_disk1/public/weights/Qwen1.5-14B-Chat"),
+        file="data/raw_data/qa_scoring_xtop_qualib_openroad_v11_03.jsonl",
+        tokenizer=load_tokenizer("/nvme_disk1/public/weights/Qwen2.5-32B-Instruct"),
         max_seq_length=4096,
         template_map=template_map,
     )
     data = dataset[-1]
-    print(data)
 
     # dataset = CustomDPODataset(
     #     # file="data/raw_data/qa_xtop_dpo_merged_v2.jsonl",

@@ -1,12 +1,17 @@
-accelerate==0.21.0
-transformers==4.34
-peft==0.4.0
-bitsandbytes==0.39.0
+# common
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.2.2
+
+packaging
+accelerate==0.29.3
+transformers==4.43.3
+peft==0.10.0
+bitsandbytes==0.43.1
 loguru==0.7.0
-numpy==1.21.4
-pandas==1.2.5
+numpy==1.26.4
+# pandas==2.2.2
 tqdm==4.62.3
-deepspeed==0.9.5
+deepspeed==0.15.1
 tensorboard
 sentencepiece
 transformers_stream_generator
@@ -14,12 +19,12 @@ tiktoken
 einops
 httpx
 scipy
-torch==1.13.1
 mmengine
 xformers
 astunparse==1.6.2
-flash_attn
+# flash-attn==2.5.7
 datasets
 trl==0.7.11
 typing_extensions==4.9.0
 mpi4py
+trl==0.9.6

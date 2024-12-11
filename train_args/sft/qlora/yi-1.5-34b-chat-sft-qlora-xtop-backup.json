@@ -1,0 +1,36 @@
+{
+    "output_dir": "/nvme_disk1/tairu/weights/YI-1.5-34B-Chat_qa_xtop_qualib_openroad_v9_epoch_4_max_seq_4096_lora_rank_32_v1",
+    "model_name_or_path": "/nvme_disk1/public/weights/Yi-1.5-34B-Chat",
+    "train_file": "data/raw_data/qa_scoring_xtop_qualib_openroad_v9.jsonl",
+    "template_map": {
+        "qa_scoring_v7": "yi_qa_scoring_v8",
+        "qa_scoring_v8": "yi_qa_scoring_v8",
+        "qa_scoring_v9": "yi_qa_scoring_v9",
+        "qa_naked_v7": "yi_qa_naked_v5"
+    },
+    "num_train_epochs": 2,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 4,   # 16
+    "learning_rate": 2e-4,  # 1e-4
+    "max_seq_length": 4096, # 5000
+    "logging_steps": 1,
+    "save_steps": 1000,
+    "save_total_limit": 5,
+    "lr_scheduler_type": "cosine",  # warmup_cosine
+    "warmup_steps": 100,    # warm_ratio 0.03~0.05
+    "lora_rank": 32,        # <128
+    "lora_alpha": 16,       # 0.5~1 * lora_rank
+    "lora_dropout": 0.05,
+
+    "gradient_checkpointing": true,
+    "disable_tqdm": false,
+    "optim": "paged_adamw_32bit",   # paged_adamw_8bit
+    "seed": 42,
+    "fp16": true,   # bf16
+    "report_to": "tensorboard",
+    "dataloader_num_workers": 0,
+    "save_strategy": "steps",
+    "weight_decay": 0,
+    "max_grad_norm": 0.3,   # 1.0
+    "remove_unused_columns": false
+}

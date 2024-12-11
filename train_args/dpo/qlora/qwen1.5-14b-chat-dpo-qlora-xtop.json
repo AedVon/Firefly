@@ -1,7 +1,7 @@
 {
-    "output_dir": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_dpo_epoch_1_v4",
-    "model_name_or_path": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_openroad_epoch_4_v2_merge_lora",
-    "train_file": "data/raw_data/qa_xtop_dpo_merged.jsonl",
+    "output_dir": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_dpo_epoch_1_v6",
+    "model_name_or_path": "/nvme_disk1/tairu/weights/Qwen1.5-14B-Chat_qa_xtop_openroad_epoch_4_lora_rank_64_v1_merge_lora",
+    "train_file": "data/raw_data/qa_xtop_dpo_merged_v3.jsonl",
     "template_name": "qa_xtop_dpo",
     "train_mode": "qlora",
     "task_type": "dpo",

@@ -287,13 +287,38 @@ class CustomEDASFTDataset(Dataset):
         #         input_ids += input_tokens + output_tokens
         #         target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
 
-        elif category in ["qa_scoring_v12"]:
+        elif category in ["qa_scoring_v12", "qa_scoring_v13", "qa_scoring_v14"]:
             template = self.template_map[category]
             tool = conversations[0]["tool"]
             reference = conversations[0]["reference"]
             reference = self._parse_reference(reference, tool=tool, llm="qwen")
 
             system_text = template.system_format.format(content=template.system).replace("{tool}", tool)
+            input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
+            target_mask = [0] * len(input_ids)
+
+            # 拼接多轮对话
+            for conv in conversations:
+                question = conv["question"]
+                answer = conv["answer"]
+                question = f"{question} 可以详细说明一下吗？"
+
+                # format and encode
+                human = template.user_format.format(query=question, tool=tool, reference=reference)
+                assistant = template.assistant_format.format(content=answer)
+                input_tokens = self.tokenizer.encode(human, add_special_tokens=False)
+                output_tokens = self.tokenizer.encode(assistant, add_special_tokens=False)
+
+                input_ids += input_tokens + output_tokens
+                target_mask += [0] * len(input_tokens) + [1] * len(output_tokens)
+
+        elif category in ["qa_scoring_v14_gpt"]:
+            template = self.template_map[category]
+            tool = conversations[0]["tool"]
+            reference = conversations[0]["reference"]
+            reference = self._parse_reference(reference, tool=tool, llm="qwen")
+
+            system_text = template.system_format.format(content=template.system)
             input_ids = self.tokenizer.encode(system_text, add_special_tokens=False)
             target_mask = [0] * len(input_ids)
 

@@ -20,6 +20,9 @@ from .prompt_template import (
     QA_SCORING_V11_PROMPT,
     QA_SCORING_IMAGE_V11_PROMPT,
     QA_SCORING_V12_PROMPT,
+    QA_SCORING_V13_PROMPT,
+    QA_SCORING_V14_PROMPT,
+    QA_SCORING_GPT_V14_PROMPT,
 )
 
 
@@ -272,5 +275,32 @@ register_template(
     user_format='<|im_start|>user\n这是一条关于{tool}工具的问题：\n{query}\n\n参考资料：\n{reference}<|im_end|>\n<|im_start|>assistant\n',
     assistant_format='{content}<|im_end|>',
     system=QA_SCORING_V12_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qwen_qa_scoring_v13",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user\n这是一条关于{tool}工具的问题：\n{query}\n\n参考资料：\n{reference}<|im_end|>\n<|im_start|>assistant\n',
+    assistant_format='{content}<|im_end|>',
+    system=QA_SCORING_V13_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qwen_qa_scoring_v14",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user\n这是一条关于{tool}工具的问题：\n{query}\n\n参考资料：\n{reference}<|im_end|>\n<|im_start|>assistant\n',
+    assistant_format='{content}<|im_end|>',
+    system=QA_SCORING_V14_PROMPT,
+    stop_word='<|im_end|>'
+)
+
+register_template(
+    template_name="qwen_qa_scoring_gpt_v14",
+    system_format='<|im_start|>system\n{content}<|im_end|>\n',
+    user_format='<|im_start|>user\n这是一条关于{tool}工具的问题：\n{query}\n\n参考资料：\n{reference}<|im_end|>\n<|im_start|>assistant\n',
+    assistant_format='{content}<|im_end|>',
+    system=QA_SCORING_GPT_V14_PROMPT,
     stop_word='<|im_end|>'
 )
